@@ -1,0 +1,107 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+def backtest(data, **kwargs):
+    """
+    백테스팅 함수
+
+    Parameters:
+        data (pd.DataFrame): OHLCV 데이터가 포함된 데이터프레임.
+        kwargs:
+            - trade_fee (float): 거래 수수료 비율 (기본값: 0.001).
+            - slippage (float): 슬리피지 비율 (기본값: 0.0).
+            - buy_signal (callable): 매수 신호를 반환하는 함수.
+            - sell_signal (callable): 매도 신호를 반환하는 함수.
+            - initial_balance (float): 초기 자산 (기본값: 1000000).
+            - window_size (int): 슬라이딩 윈도우 크기 (기본값: 30).
+    
+    Returns:
+        pd.DataFrame: 잔고 및 트레이딩 기록을 포함한 데이터프레임.
+    """
+    # 기본 파라미터 설정
+    trade_fee = kwargs.get("trade_fee", 0.001)
+    slippage = kwargs.get("slippage", 0.0)
+    buy_signal = kwargs.get("buy_signal", lambda row: False)
+    sell_signal = kwargs.get("sell_signal", lambda row: False)
+    initial_balance = kwargs.get("initial_balance", 1000000)
+    window_size = kwargs.get("window_size", 30)
+
+    # 초기 변수 설정
+    cash_balance = initial_balance
+    asset_balance = 0
+    balance_history = []
+    trades = []
+
+    # 백테스팅 루프
+    for i in range(len(data)):
+        current_price = data.iloc[i]["tradePrice"]
+
+        # 상태값 계산 (슬라이딩 윈도우 고려)
+        if i >= window_size:
+            row = data.iloc[i - window_size + 1:i + 1].iloc[-1]
+
+            # 매수/매도 시그널
+            if buy_signal(row) and cash_balance > 0:
+                trade_price = current_price * (1 + slippage)
+                asset_balance += cash_balance * (1 - trade_fee) / trade_price
+                trades.append({"type": "buy", "price": trade_price, "timestamp": row["timestamp"]})
+                cash_balance = 0  # 현금을 모두 자산으로 변환
+            elif sell_signal(row) and asset_balance > 0:
+                trade_price = current_price * (1 - slippage)
+                cash_balance += asset_balance * trade_price * (1 - trade_fee)
+                trades.append({"type": "sell", "price": trade_price, "timestamp": row["timestamp"]})
+                asset_balance = 0  # 자산을 모두 현금으로 변환
+
+        # 잔고 계산
+        total_balance = cash_balance + asset_balance * current_price
+        balance_history.append(total_balance)
+
+    # 결과 정리
+    results = pd.DataFrame({
+        "timestamp": data["timestamp"],
+        "total_balance": balance_history
+    })
+    return results, trades
+
+# 매수/매도 신호 함수 예제
+def buy_signal_example(row):
+    # RSI가 30 이하일 때 매수 신호
+    return row["rsi"] < 30
+
+def sell_signal_example(row):
+    # RSI가 70 이상일 때 매도 신호
+    return row["rsi"] > 70
+
+# 테스트 데이터
+data = pd.DataFrame([
+    # 여기에 데이터를 삽입
+])
+
+# 테스트 데이터에 RSI 추가 (예제)
+data["rsi"] = np.random.uniform(20, 80, size=len(data))  # 예제 데이터를 위한 임의의 RSI 값
+
+# 백테스팅 실행
+results, trades = backtest(
+    data,
+    trade_fee=0.001,
+    slippage=0.0005,
+    buy_signal=buy_signal_example,
+    sell_signal=sell_signal_example,
+    initial_balance=1000000,
+    window_size=30
+)
+
+# 결과 출력
+print("Final Balance:", results["total_balance"].iloc[-1])
+print("Trade Log:")
+for trade in trades:
+    print(trade)
+
+# 결과 시각화
+plt.plot(results["timestamp"], results["total_balance"], label="Total Balance")
+plt.xlabel("Time")
+plt.ylabel("Balance")
+plt.title("Backtesting Balance Over Time")
+plt.legend()
+plt.show()
